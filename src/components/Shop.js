@@ -2,14 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, addDoc, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Grid, Card, CardMedia, CardContent, CardActions, Typography, Button, Dialog, DialogTitle, DialogContent, TextField, DialogActions, Avatar, Box } from '@mui/material';
+import { Grid, Card, CardMedia, CardContent, CardActions, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions, Avatar, Box } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+import Donate from './Donate'; // Import Donate component
 
 const Shop = ({ user }) => {
   const [products, setProducts] = useState([]);
   const [openDonateDialog, setOpenDonateDialog] = useState(false);
   const [selectedWeaverId, setSelectedWeaverId] = useState(null);
-  const [donateAmount, setDonateAmount] = useState(0);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const navigate = useNavigate();
 
@@ -24,17 +24,22 @@ const Shop = ({ user }) => {
           name: 'Mock Inabel Textile',
           price: 50.00,
           description: 'Handwoven using traditional loom techniques. Size: 2m x 1m. Made from natural cotton fibers and dyed with organic colors.',
-          images: ['https://via.placeholder.com/300x200?text=Mock+Weaving+Product'], // Array for consistency
+          images: ['https://via.placeholder.com/300x200?text=Mock+Weaving+Product'],
           created_at: new Date().toISOString(),
         };
         fetchedProducts = [mockProduct];
       }
-      const productsWithWeavers = await Promise.all(fetchedProducts.map(async (prod) => {
+      // Normalize data: ensure images is always an array
+      const normalizedProducts = fetchedProducts.map(prod => ({
+        ...prod,
+        images: Array.isArray(prod.images) ? prod.images : prod.image ? [prod.image] : ['https://via.placeholder.com/300x200?text=No+Image'],
+      }));
+      const productsWithWeavers = await Promise.all(normalizedProducts.map(async (prod) => {
         let weaverName = 'Unknown Weaver';
         let weaverPhotoURL = '';
         if (prod.weaver_id === 'mock_weaver_id') {
           weaverName = 'Mock Weaver';
-          weaverPhotoURL = 'https://via.placeholder.com/40?text=MW'; // Mock avatar
+          weaverPhotoURL = 'https://via.placeholder.com/40?text=MW';
         } else {
           const weaverDoc = await getDoc(doc(db, 'users', prod.weaver_id));
           if (weaverDoc.exists()) {
@@ -46,7 +51,7 @@ const Shop = ({ user }) => {
       }));
       setProducts(productsWithWeavers);
     };
-    fetchProducts();
+    fetchProducts().catch(console.error); // Log any errors during fetch
   }, []);
 
   const makePurchase = async (productId) => {
@@ -60,23 +65,6 @@ const Shop = ({ user }) => {
     setOpenDonateDialog(true);
   };
 
-  const handleDonate = async () => {
-    try {
-      await addDoc(collection(db, 'donations'), {
-        user_id: user.uid,
-        weaver_id: selectedWeaverId,
-        amount: donateAmount,
-        date: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-      });
-      alert(`Donated $${donateAmount} to the weaver!`);
-      setOpenDonateDialog(false);
-      setDonateAmount(0);
-    } catch (error) {
-      console.error('Donation error:', error);
-    }
-  };
-
   const goToProfile = (weaverId) => {
     navigate(`/profile/${weaverId}`);
   };
@@ -88,7 +76,12 @@ const Shop = ({ user }) => {
         {products.map(product => (
           <Grid item xs={12} sm={6} md={4} key={product.id}>
             <Card>
-              <CardMedia component="img" height="140" image={product.images[0] || 'https://via.placeholder.com/300x200?text=No+Image'} alt={product.name} />
+              <CardMedia
+                component="img"
+                height="140"
+                image={product.images && product.images.length > 0 ? product.images[0] : 'https://via.placeholder.com/300x200?text=No+Image'}
+                alt={product.name}
+              />
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                   <Avatar src={product.weaverPhotoURL} alt={product.weaverName} sx={{ width: 24, height: 24, mr: 1, cursor: 'pointer' }} onClick={() => goToProfile(product.weaver_id)} />
@@ -109,20 +102,10 @@ const Shop = ({ user }) => {
       <Dialog open={openDonateDialog} onClose={() => setOpenDonateDialog(false)}>
         <DialogTitle>Donate to Weaver</DialogTitle>
         <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Amount"
-            type="number"
-            fullWidth
-            variant="standard"
-            value={donateAmount}
-            onChange={(e) => setDonateAmount(e.target.value)}
-          />
+          <Donate user={user} weaverId={selectedWeaverId} />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDonateDialog(false)}>Cancel</Button>
-          <Button onClick={handleDonate}>Donate</Button>
+          <Button onClick={() => setOpenDonateDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
       <Dialog open={!!selectedProduct} onClose={() => setSelectedProduct(null)} maxWidth="md" fullWidth>
@@ -141,7 +124,7 @@ const Shop = ({ user }) => {
             </Grid>
             <Grid item xs={12} md={4}>
               <Grid container spacing={2}>
-                {selectedProduct?.images.map((img, index) => (
+                {selectedProduct?.images && selectedProduct.images.map((img, index) => (
                   <Grid item xs={12} key={index}>
                     <CardMedia component="img" image={img} alt={`${selectedProduct.name} image ${index + 1}`} sx={{ width: '100%', height: 'auto' }} />
                   </Grid>

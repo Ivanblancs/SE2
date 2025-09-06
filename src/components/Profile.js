@@ -13,6 +13,7 @@ const Profile = ({ user, role }) => {
   const [videos, setVideos] = useState([]);
   const [tabValue, setTabValue] = useState(0);
   const [profileRole, setProfileRole] = useState(null);
+  const [totalDonations, setTotalDonations] = useState(0);
 
   useEffect(() => {
     const targetUserId = profileUserId || user?.uid; // Use param or current user
@@ -27,7 +28,7 @@ const Profile = ({ user, role }) => {
           photoURL: 'https://via.placeholder.com/80?text=MU', // Mock avatar
         });
         setProfileRole('weaver'); // Assume weaver for mock, adjust as needed
-        // Mock videos/products if desired (empty for simplicity)
+        setTotalDonations(0); // Mock donation
         setVideos([]);
         setProducts([]);
         return;
@@ -50,9 +51,16 @@ const Profile = ({ user, role }) => {
           const productsSnapshot = await getDocs(productsQuery);
           setProducts(productsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }
+
+        // Fetch total donations for the weaver
+        const donationsQuery = query(collection(db, 'donations'), where('weaver_id', '==', targetUserId));
+        const donationsSnapshot = await getDocs(donationsQuery);
+        const total = donationsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+        setTotalDonations(total);
       } else {
         // Handle non-existent real user
         setProfileData(null);
+        setTotalDonations(0);
       }
     };
     fetchProfile();
@@ -74,6 +82,9 @@ const Profile = ({ user, role }) => {
           <Typography variant="h5">{profileData.name}</Typography>
           <Typography variant="subtitle1">{profileData.email}</Typography>
           <Typography variant="body2">Role: {profileRole}</Typography>
+          {profileRole === 'weaver' && (
+            <Typography variant="body2" color="primary">Total Donations Received: ${totalDonations.toFixed(2)}</Typography>
+          )}
         </Box>
       </Box>
 
