@@ -349,7 +349,7 @@ const Shop = ({ user }) => {
             {product.name}
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            ${product.price.toFixed(2)}
+            ₱{product.price.toFixed(2)}
           </Typography>
         </CardContent>
 

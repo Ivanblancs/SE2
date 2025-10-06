@@ -1,4 +1,3 @@
-// src/components/Cart.js
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
@@ -9,6 +8,8 @@ import {
   deleteDoc,
   query,
   addDoc,
+  getDoc,
+  setDoc,
 } from 'firebase/firestore';
 import {
   Box,
@@ -26,20 +27,39 @@ import {
   DialogContent,
   DialogActions,
   Avatar,
+  TextField,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ShoppingCartCheckoutIcon from '@mui/icons-material/ShoppingCartCheckout';
 import ShoppingBasketIcon from '@mui/icons-material/ShoppingBasket';
 import InfoIcon from '@mui/icons-material/Info';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
 const Cart = ({ user }) => {
   const navigate = useNavigate();
   const [cartItems, setCartItems] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // Shipping info dialog
+  const [openShipping, setOpenShipping] = useState(false);
+  const [shipping, setShipping] = useState({
+    fullName: '',
+    address: '',
+    city: '',
+    province: '',
+    postalCode: '',
+    phone: '',
+  });
+  const [hasShipping, setHasShipping] = useState(false);
+
+  // ✅ Thank You dialog and total
+  const [thankYouOpen, setThankYouOpen] = useState(false);
+  const [thankYouTotal, setThankYouTotal] = useState(0);
+
   useEffect(() => {
     if (user) {
       fetchCartFromDB();
+      checkExistingShipping();
     }
   }, [user]);
 
@@ -56,6 +76,21 @@ const Cart = ({ user }) => {
       setCartItems(dbCart);
     } catch (error) {
       console.error('Fetch cart error:', error);
+    }
+  };
+
+  const checkExistingShipping = async () => {
+    if (!user) return;
+    try {
+      const shippingDoc = await getDoc(doc(db, `users/${user.uid}/shipping`, 'default'));
+      if (shippingDoc.exists()) {
+        setHasShipping(true);
+        setShipping(shippingDoc.data());
+      } else {
+        setHasShipping(false);
+      }
+    } catch (err) {
+      console.error('Check shipping error:', err);
     }
   };
 
@@ -84,23 +119,49 @@ const Cart = ({ user }) => {
 
   const handleCheckout = async () => {
     if (!user) return alert('Login required');
+
+    // ask for shipping details first time
+    if (!hasShipping) {
+      setOpenShipping(true);
+      return;
+    }
+
     try {
+      const totalAmount = parseFloat(calculateTotal()); // ✅ store before clearing
+
       await addDoc(collection(db, 'orders'), {
         user_id: user.uid,
         items: cartItems,
-        total: parseFloat(calculateTotal()),
+        total: totalAmount,
+        shipping: shipping,
         date: new Date().toISOString(),
         status: 'completed',
       });
+
+      // Clear cart
       const cartQuery = query(collection(db, `users/${user.uid}/carts`));
       const querySnapshot = await getDocs(cartQuery);
       querySnapshot.forEach(async (doc) => await deleteDoc(doc.ref));
       setCartItems([]);
-      alert(`Checkout successful! Total: $${calculateTotal()}.`);
-      navigate('/shop');
+
+      // ✅ Show thank-you dialog with total
+      setThankYouTotal(totalAmount);
+      setThankYouOpen(true);
     } catch (error) {
       console.error('Checkout error:', error);
       alert('Failed to complete checkout. Please try again.');
+    }
+  };
+
+  const saveShipping = async () => {
+    try {
+      await setDoc(doc(db, `users/${user.uid}/shipping`, 'default'), shipping);
+      setHasShipping(true);
+      setOpenShipping(false);
+      alert('Shipping details saved. You can now proceed with checkout.');
+    } catch (err) {
+      console.error('Save shipping error:', err);
+      alert('Failed to save shipping info.');
     }
   };
 
@@ -168,7 +229,6 @@ const Cart = ({ user }) => {
                     '&:hover': { boxShadow: 6, transform: 'translateY(-6px)' },
                   }}
                 >
-                  {/* Image */}
                   <CardMedia
                     component="img"
                     height="200"
@@ -185,7 +245,6 @@ const Cart = ({ user }) => {
                     }}
                   />
 
-                  {/* Info */}
                   <CardContent sx={{ flexGrow: 1, p: 2 }}>
                     <Typography
                       variant="h6"
@@ -199,7 +258,7 @@ const Cart = ({ user }) => {
                       {item.name}
                     </Typography>
                     <Typography variant="body1" color="text.secondary">
-                      $
+                      ₱
                       {typeof item.price === 'number'
                         ? item.price.toFixed(2)
                         : parseFloat(item.price).toFixed(2) || '0.00'}
@@ -209,7 +268,6 @@ const Cart = ({ user }) => {
                     </Typography>
                   </CardContent>
 
-                  {/* Actions */}
                   <Box
                     sx={{
                       display: 'flex',
@@ -254,7 +312,7 @@ const Cart = ({ user }) => {
             >
               <Divider sx={{ mb: 2 }} />
               <Typography variant="h6" fontWeight={700} align="right">
-                Total: ${calculateTotal()}
+                Total: ₱{calculateTotal()}
               </Typography>
               <Button
                 variant="contained"
@@ -277,68 +335,84 @@ const Cart = ({ user }) => {
         </>
       )}
 
-      {/* Product Details Modal */}
+      {/* ✅ Thank You Dialog */}
       <Dialog
-        open={!!selectedProduct}
-        onClose={() => setSelectedProduct(null)}
-        maxWidth="md"
+        open={thankYouOpen}
+        onClose={() => {
+          setThankYouOpen(false);
+          navigate('/shop');
+        }}
+        maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>{selectedProduct?.name}</DialogTitle>
+        <DialogTitle
+          sx={{
+            textAlign: 'center',
+            fontWeight: 'bold',
+            color: 'success.main',
+          }}
+        >
+          <CheckCircleIcon sx={{ fontSize: 60, color: 'success.main', mb: 1 }} />
+          <br />
+          Thank You for Your Purchase!
+        </DialogTitle>
+        <DialogContent sx={{ textAlign: 'center' }}>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Your order has been successfully placed.
+          </Typography>
+
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+            Order Summary
+          </Typography>
+          <Typography variant="body2">
+            Total Amount: <strong>₱{thankYouTotal.toFixed(2)}</strong>
+          </Typography>
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>
+            Shipping To:
+          </Typography>
+          <Typography variant="body2">{shipping.fullName}</Typography>
+          <Typography variant="body2">
+            {shipping.address}, {shipping.city}, {shipping.province}
+          </Typography>
+          <Typography variant="body2">📞 {shipping.phone}</Typography>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => {
+              setThankYouOpen(false);
+              navigate('/shop');
+            }}
+          >
+            Continue Shopping
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Shipping Info Dialog */}
+      <Dialog open={openShipping} onClose={() => setOpenShipping(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Enter Shipping Details</DialogTitle>
         <DialogContent dividers>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={7}>
-              <Typography variant="h6" fontWeight={700}>
-                Price: ${selectedProduct?.price?.toFixed(2) || '0.00'}
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 2 }}>
-                Quantity: {selectedProduct?.quantity || 1}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
-                <Avatar
-                  src={selectedProduct?.weaverPhotoURL}
-                  alt={selectedProduct?.weaverName}
-                  sx={{
-                    width: 44,
-                    height: 44,
-                    mr: 2,
-                    border: '2px solid #ddd',
-                  }}
-                />
-                <Typography
-                  variant="h6"
-                  sx={{ color: 'primary.main' }}
-                >
-                  Weaver: {selectedProduct?.weaverName || 'Unknown'}
-                </Typography>
-              </Box>
-              <Typography variant="body1" sx={{ mt: 3 }}>
-                {selectedProduct?.description || 'No description available.'}
-              </Typography>
-            </Grid>
-            <Grid item xs={12} md={5}>
-              <Grid container spacing={2}>
-                {selectedProduct?.images?.map((img, index) => (
-                  <Grid item xs={12} key={index}>
-                    <CardMedia
-                      component="img"
-                      image={img}
-                      alt={`${selectedProduct?.name} image ${index + 1}`}
-                      sx={{
-                        width: '100%',
-                        height: 'auto',
-                        borderRadius: 2,
-                        boxShadow: 2,
-                      }}
-                    />
-                  </Grid>
-                ))}
-              </Grid>
-            </Grid>
-          </Grid>
+          <TextField fullWidth margin="dense" label="Full Name" value={shipping.fullName}
+            onChange={(e) => setShipping({ ...shipping, fullName: e.target.value })} />
+          <TextField fullWidth margin="dense" label="Address" value={shipping.address}
+            onChange={(e) => setShipping({ ...shipping, address: e.target.value })} />
+          <TextField fullWidth margin="dense" label="City" value={shipping.city}
+            onChange={(e) => setShipping({ ...shipping, city: e.target.value })} />
+          <TextField fullWidth margin="dense" label="Province" value={shipping.province}
+            onChange={(e) => setShipping({ ...shipping, province: e.target.value })} />
+          <TextField fullWidth margin="dense" label="Postal Code" value={shipping.postalCode}
+            onChange={(e) => setShipping({ ...shipping, postalCode: e.target.value })} />
+          <TextField fullWidth margin="dense" label="Phone Number" value={shipping.phone}
+            onChange={(e) => setShipping({ ...shipping, phone: e.target.value })} />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSelectedProduct(null)}>Close</Button>
+          <Button onClick={() => setOpenShipping(false)}>Cancel</Button>
+          <Button variant="contained" onClick={saveShipping}>Save Shipping Info</Button>
         </DialogActions>
       </Dialog>
     </Box>
